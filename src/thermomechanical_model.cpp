@@ -745,6 +745,7 @@ void ThermomechanicalModel::assembleHeatRHS(const double& time) {
 
   double Told = 0.;
   double theta_dot = 0.;
+  bool mechToThermCoupling = d_material_p->d_deck.d_mechToThermCoupling;
 
   // Loop over elements
   libMesh::MeshBase::const_element_iterator el = d_mesh.active_local_elements_begin();
@@ -780,7 +781,8 @@ void ThermomechanicalModel::assembleHeatRHS(const double& time) {
         d_material_p->d_deck.d_Cv * phi[i][qp] * Told;
 
         // Add term due to theta_dot (explicit)
-        Fe(i) += d_dt * JxW[qp] * d_material_p->d_thetaDotFactor * theta_dot * Told * phi[i][qp];
+        if (mechToThermCoupling)
+          Fe(i) += d_dt * JxW[qp] * d_material_p->d_thetaDotFactor * theta_dot * Told * phi[i][qp];
       }
     }
 

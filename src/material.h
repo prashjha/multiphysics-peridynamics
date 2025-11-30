@@ -325,7 +325,10 @@ public:
         + (d_deviatoricFactor / mx) * J * ed;
     }
  
-    return force + getThermalBondForce(r, s, fs, mx, thetax, Tx, for_nodal);
+    if (d_deck.d_thermToMechCoupling)
+      return force + getThermalBondForce(r, s, fs, mx, thetax, Tx, for_nodal);
+    else
+      return force;
   };
 
   double getThermalBondForce(const double &r, const double &s, bool &fs, const double

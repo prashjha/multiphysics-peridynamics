@@ -152,7 +152,7 @@ void computeFracturedBondFd(const libMesh::dof_id_type &i, geom::EdgeCrack &crac
             // modify only those nodes which lie on opposite side (in this
             // case on right side)
             if (crack.ptRightside(xj, pb, pt) and modify) {
-                std::cout << "setBondState(i, loc_j, modify) = " << i << ", " << loc_j << ", " << modify << std::endl;
+                // std::cout << "setBondState(i, loc_j, modify) = " << i << ", " << loc_j << ", " << modify << std::endl;
                 setBondState(i, loc_j, modify);
             }
         }

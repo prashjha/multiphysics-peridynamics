@@ -31,7 +31,7 @@ struct Domain{
 
 void applyTemperatureBoundaryConditions(libMesh::EquationSystems &equation_systems, const inp::MaterialDeck &material_deck, const double &T0, const double & T1);
 
-void setDisplacementAndForceConditions(std::shared_ptr<model::ThermomechanicalModel> &model_p, const Domain &domain, const double &tFinal, const double &load_rate);
+void setDisplacementAndForceConditions(std::shared_ptr<model::ThermomechanicalModel> &model_p, const Domain &domain, const double &tFinal, const double &load_rate, const double &disp_rate);
 
 void setObservationPoints(std::shared_ptr<model::ThermomechanicalModel> &model_p, const Domain &domain);
 
@@ -44,9 +44,9 @@ int main(int argc, char** argv) {
 
   // Problem parameters
   int dim = 2;
-  double Lx = 0.04, Ly = 0.01, Lz = 0.0;
+  double Lx = 4.0, Ly = 1.0, Lz = 0.0;
   if (dim == 3) {
-    Lz = 0.01;
+    Lz = 1.0;
   }
   libMesh::Point center(0.5*Lx, 0.5*Ly, 0.5*Lz);
   Domain domain{dim, Lx, Ly, Lz, center};
@@ -60,13 +60,14 @@ int main(int argc, char** argv) {
   // material_deck.d_alpha = 0.0;
 
   double dt = 2e-6;
-  double tFinal = 0.0002;
+  double tFinal = 2e-3;
   int nsteps = tFinal/dt;
   int write_interval = nsteps/100;
   
   const double T0 = material_deck.d_Tref; // Initial temperature in K
   const double T1 = material_deck.d_Tref + 100.0; // Dirichlet BC at x = L (if no robinBC)
   const double load_rate = 0.0; // Load rate in N/s
+  const double disp_rate = 1e-1; 
 
   // source 1 - hot on right side 
   auto heat_sources_p = std::make_shared<loading::HeatSourceCollection>();
@@ -78,7 +79,7 @@ int main(int argc, char** argv) {
     // std::string tfn_type = "linear_step_const_value";
     // std::vector<double> tfn_params = {1000.0/tFinal, 0.0, 0.2*tFinal, tFinal};
     std::string tfn_type = "linear";
-    std::vector<double> tfn_params = {10000000.0/tFinal};
+    std::vector<double> tfn_params = {0.0/tFinal}; // {20000000.0/tFinal};
     auto hs_geo = std::shared_ptr<geom::GeomObject>(nullptr);
     if (dim == 2) {
       hs_geo = std::make_shared<geom::Rectangle>(L1, L2, x0);
@@ -157,13 +158,13 @@ int main(int argc, char** argv) {
   // Initialize model
   model_p->initialize();
 
-  setDisplacementAndForceConditions(model_p, domain, tFinal, load_rate);
+  setDisplacementAndForceConditions(model_p, domain, tFinal, load_rate, disp_rate);
 
   // get nodes at obs points
   setObservationPoints(model_p, domain);
 
   // set precrack
-  // setPrecrack(model_p, domain);
+  setPrecrack(model_p, domain);
 
   model_p->secondaryInitialize();
 
@@ -263,7 +264,9 @@ void applyTemperatureBoundaryConditions(libMesh::EquationSystems &equation_syste
   }
 }
 
-void setDisplacementAndForceConditions(std::shared_ptr<model::ThermomechanicalModel> &model_p, const Domain &domain, const double &tFinal, const double &load_rate) {
+void setDisplacementAndForceConditions(std::shared_ptr<model::ThermomechanicalModel> &model_p, 
+    const Domain &domain, const double &tFinal, 
+    const double &load_rate, const double &disp_rate) {
   auto& loading_p = model_p->d_loading_p;
 
   // displacement BC: volume of thickness horizon from x = 0 to x = horizon
@@ -275,33 +278,95 @@ void setDisplacementAndForceConditions(std::shared_ptr<model::ThermomechanicalMo
       auto& bc = loading_p->d_disp_bcs[0];
       bc.d_type = "Displacement_BC";
       auto left_face_center = domain.d_x - libMesh::Point(0.5*domain.d_Lx, 0.0, 0.0);
-      bc.d_region_p = std::make_shared<geom::Cuboid>(horizon, domain.d_Ly, domain.d_Lz, left_face_center + libMesh::Point(0.5*horizon, 0.0, 0.0));
+      bc.d_region_p = std::shared_ptr<geom::GeomObject>(nullptr);
+      if (dim == 2){
+        bc.d_region_p = std::make_shared<geom::Rectangle>(horizon, domain.d_Ly, left_face_center + libMesh::Point(0.5*horizon, 0.0, 0.0));
+      } else {
+        bc.d_region_p = std::make_shared<geom::Cuboid>(horizon, domain.d_Ly, domain.d_Lz, left_face_center + libMesh::Point(0.5*horizon, 0.0, 0.0));
+      }
       bc.d_direction = {0, 1, 2};
       bc.d_is_zero = true;
     }
 
-    if (loading_p->d_disp_bcs.size() > 1) {
-      auto& bc = loading_p->d_disp_bcs[1];
-      bc.d_type = "Displacement_BC";
-      auto right_face_center = domain.d_x + libMesh::Point(0.5*domain.d_Lx, 0.0, 0.0);
-      bc.d_region_p = std::make_shared<geom::Cuboid>(horizon, domain.d_Ly, domain.d_Lz, right_face_center - libMesh::Point(0.5*horizon, 0.0, 0.0));
-      bc.d_direction = {0, 1, 2};
-      bc.d_is_zero = true;
+    if (std::abs(disp_rate) > 1e-10) {
+      double padding = 0.5*horizon;
+      double vert_thickness = domain.d_Ly*0.4;
+      double vert_center_top = domain.d_x(1) + 0.5*domain.d_Ly - 0.5*vert_thickness + padding;
+      double vert_center_bottom = domain.d_x(1) - 0.5*domain.d_Ly + 0.5*vert_thickness - padding;
+      double horz_thickness = 2*horizon;
+      double horz_center = domain.d_x(0) + 0.5*domain.d_Lx - 0.5*horz_thickness + padding;
+      {
+        auto bc = inp::BCBase("Displacement_BC");
+        auto hs_geo = std::shared_ptr<geom::GeomObject>(nullptr);
+        if (dim == 2){
+          hs_geo = std::make_shared<geom::Rectangle>(horz_thickness, vert_thickness, libMesh::Point(horz_center, vert_center_top, domain.d_x(2)));
+        } else {
+          hs_geo = std::make_shared<geom::Cuboid>(horz_thickness, vert_thickness, domain.d_Lz, libMesh::Point(horz_center, vert_center_top, domain.d_x(2)));
+        }
+        bc.d_region_p = hs_geo;
+        bc.d_direction = {1};
+        bc.d_time_fn_type = "linear";
+        bc.d_time_fn_params = {disp_rate};
+        loading_p->d_disp_bcs.push_back(bc);
+      }
+
+      {
+        auto bc = inp::BCBase("Displacement_BC");
+        auto hs_geo = std::shared_ptr<geom::GeomObject>(nullptr);
+        if (dim == 2){
+          hs_geo = std::make_shared<geom::Rectangle>(horz_thickness, vert_thickness, libMesh::Point(horz_center, vert_center_bottom, domain.d_x(2)));
+        } else {
+          hs_geo = std::make_shared<geom::Cuboid>(horz_thickness, vert_thickness, domain.d_Lz, libMesh::Point(horz_center, vert_center_bottom, domain.d_x(2)));
+        }
+        bc.d_region_p = hs_geo;
+        bc.d_direction = {1};
+        bc.d_time_fn_type = "linear";
+        bc.d_time_fn_params = {-disp_rate};
+        loading_p->d_disp_bcs.push_back(bc);
+      }
     }
   }
   
   // force BC: volume of thickness horizon from x = L - horizon to x = L
   if (std::abs(load_rate) > 1e-10) {
-    loading_p->d_force_bcs.resize(1);
-    auto& bc = loading_p->d_force_bcs[0];
-    bc.d_type = "Force_BC";
-    auto right_face_center = domain.d_x + libMesh::Point(0.5*domain.d_Lx, 0.0, 0.0);
-    bc.d_region_p = std::make_shared<geom::Cuboid>(horizon, domain.d_Ly, domain.d_Lz, right_face_center - libMesh::Point(0.5*horizon, 0.0, 0.0));
-    bc.d_direction = {0};
-    bc.d_time_fn_type = "linear_step";
-    bc.d_time_fn_params = {load_rate, 0.25*tFinal, tFinal};
-    // bc.d_time_fn_type = "sin";
-    // bc.d_time_fn_params = {load_rate, 4.0/tFinal}; // 4 cycles in [0, tFinal]
+    loading_p->d_force_bcs.resize(2);
+
+    double vert_thickness = domain.d_Ly*0.2;
+    double vert_center_top = domain.d_x(1) + 0.5*domain.d_Ly - 0.5*vert_thickness;
+    double vert_center_bottom = domain.d_x(1) - 0.5*domain.d_Ly + 0.5*vert_thickness;
+    double horz_thickness = 2*horizon;
+    double horz_center = domain.d_x(0) + 0.5*domain.d_Lx - 0.5*horz_thickness;
+    {
+      // pull up on rgiht top part
+      auto& bc = loading_p->d_force_bcs[0];
+      bc.d_type = "Force_BC";
+      auto hs_geo = std::shared_ptr<geom::GeomObject>(nullptr);
+      if (dim == 2){
+        hs_geo = std::make_shared<geom::Rectangle>(horz_thickness, vert_thickness, libMesh::Point(horz_center, vert_center_top, domain.d_x(2)));
+      } else {
+        hs_geo = std::make_shared<geom::Cuboid>(horz_thickness, vert_thickness, domain.d_Lz, libMesh::Point(horz_center, vert_center_top, domain.d_x(2)));
+      }
+      bc.d_region_p = hs_geo;
+      bc.d_direction = {1};
+      bc.d_time_fn_type = "linear";
+      bc.d_time_fn_params = {load_rate};
+    }
+
+    {
+      // pull down on rgiht bottom part
+      auto& bc = loading_p->d_force_bcs[1];
+      bc.d_type = "Force_BC";
+      auto hs_geo = std::shared_ptr<geom::GeomObject>(nullptr);
+      if (dim == 2){
+        hs_geo = std::make_shared<geom::Rectangle>(horz_thickness, vert_thickness, libMesh::Point(horz_center, vert_center_bottom, domain.d_x(2)));
+      } else {
+        hs_geo = std::make_shared<geom::Cuboid>(horz_thickness, vert_thickness, domain.d_Lz, libMesh::Point(horz_center, vert_center_bottom, domain.d_x(2)));
+      }
+      bc.d_region_p = hs_geo;
+      bc.d_direction = {1};
+      bc.d_time_fn_type = "linear";
+      bc.d_time_fn_params = {-load_rate};
+    }
   }
 }
 
@@ -336,7 +401,7 @@ void setPrecrack(std::shared_ptr<model::ThermomechanicalModel> &model_p, const D
   const auto& Lz = domain.d_Lz;
   const auto& horizon = model_p->d_material_p->d_deck.d_horizon;
 
-  const double l = 0.2*Ly;
+  const double l = 0.5*Ly;
 
   // create a crack
   geom::EdgeCrack crack;

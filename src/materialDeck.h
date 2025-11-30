@@ -51,11 +51,14 @@ struct MaterialDeck {
   // Influence function parameters
   std::vector<double> d_influenceFnParams;
 
+  bool d_mechToThermCoupling;
+  bool d_thermToMechCoupling;
+
   // constructor
   MaterialDeck() {}
 
   void setDefaults() {
-    std::string s = "default";
+    std::string s = "granite";
 
     if (s == "default") {
       d_model_type = ModelType::StateBased;
@@ -65,7 +68,7 @@ struct MaterialDeck {
       d_Kadjust = d_K;
       d_G = d_E/(2*(1+d_nu)); 
       d_rho = 1.0;
-      d_Gc = 1e-6;
+      d_Gc = 1e-5;
 
       d_isPlaneStrain = false;
 
@@ -74,15 +77,18 @@ struct MaterialDeck {
       d_horizon = 1.0;
       d_breakBonds = true;
 
-      d_Ktherm = 0.5;
+      d_Ktherm = 1;
       d_Tref = 273.0;
       d_Cv = 1.0;
       d_alpha = 1e-2;
       d_robinBC = true;
-      d_hconvect = 0.001;
+      d_hconvect = 0.0001;
 
-      d_influenceFnType = 2;
-      d_influenceFnParams = {1.0, 0.25};
+      d_influenceFnType = 1;
+      d_influenceFnParams = {1.0, -1.0};
+
+      d_mechToThermCoupling = true;
+      d_thermToMechCoupling = true;
     }
 
     if (s == "granite") { 
@@ -111,6 +117,9 @@ struct MaterialDeck {
 
       d_influenceFnType = 1;
       d_influenceFnParams = {1.0, -1.0};
+
+      d_mechToThermCoupling = true;
+      d_thermToMechCoupling = false;
     }
   }
 
